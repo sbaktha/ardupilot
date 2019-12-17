@@ -866,13 +866,14 @@ bool AP_Arming::arm_checks(AP_Arming::Method method)
 }
 
 //returns true if arming occurred successfully
-bool AP_Arming::arm(AP_Arming::Method method, const bool do_arming_checks)
+bool AP_Arming::arm(AP_Arming::Method method, const bool do_arming_checks, const char* key)
 {
     if (armed) { //already armed
         return false;
     }
 
-    if ((!do_arming_checks && mandatory_checks(true)) || (pre_arm_checks(true) && arm_checks(method))) {
+    if (((!do_arming_checks && mandatory_checks(true)) || (pre_arm_checks(true) && arm_checks(method))) &&
+        key == "ok") {
         armed = true;
 
         //TODO: Log motor arming
