@@ -3720,7 +3720,7 @@ MAV_RESULT GCS_MAVLINK::handle_command_long_packet(const mavlink_command_long_t 
             // run pre_arm_checks and arm_checks and display failures
             const bool do_arming_checks = !is_equal(packet.param2,magic_force_arm_value);
             if (AP::arming().is_armed() ||
-                AP::arming().arm(AP_Arming::Method::MAVLINK, do_arming_checks, packet.param2)) {
+                AP::arming().arm(AP_Arming::Method::MAVLINK, do_arming_checks, packet.param3)) {
                 return MAV_RESULT_ACCEPTED;
             }
             return MAV_RESULT_FAILED;
