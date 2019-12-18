@@ -699,7 +699,7 @@ void AP_Arming_Copter::set_pre_arm_check(bool b)
     AP_Notify::flags.pre_arm_check = b;
 }
 
-bool AP_Arming_Copter::arm(const AP_Arming::Method method, const bool do_arming_checks)
+bool AP_Arming_Copter::arm(const AP_Arming::Method method, const bool do_arming_checks, const double key)
 {
     static bool in_arm_motors = false;
 
@@ -715,7 +715,7 @@ bool AP_Arming_Copter::arm(const AP_Arming::Method method, const bool do_arming_
         return true;
     }
 
-    if (!AP_Arming::arm(method, do_arming_checks)) {
+    if (!AP_Arming::arm(method, do_arming_checks, key)) {
         AP_Notify::events.arming_failed = true;
         in_arm_motors = false;
         return false;
