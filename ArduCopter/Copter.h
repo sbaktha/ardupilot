@@ -859,15 +859,7 @@ private:
     void winch_init();
     void winch_update();
 
-    // setup.cpp
-    void report_compass();
-    void print_blanks(int16_t num);
-    void print_divider(void);
-    void print_enabled(bool b);
-    void report_version();
-
     // switches.cpp
-    void read_control_switch();
     void save_trim();
     void auto_trim();
 
