@@ -359,7 +359,7 @@ bool RC_Channel::has_override() const
     }
 
     const float override_timeout_ms = rc().override_timeout_ms();
-    return is_positive(override_timeout_ms) && ((AP_HAL::millis() - last_override_time) < (uint32_t)override_timeout_ms);
+    return (override_timeout_ms < 0) || (is_positive(override_timeout_ms) && ((AP_HAL::millis() - last_override_time) < (uint32_t)override_timeout_ms));
 }
 
 /*
@@ -451,6 +451,7 @@ void RC_Channel::init_aux_function(const aux_func_t ch_option, const aux_switch_
     // init channel options
     switch(ch_option) {
     // the following functions do not need to be initialised:
+    case AUX_FUNC::ARMDISARM:
     case AUX_FUNC::CAMERA_TRIGGER:
     case AUX_FUNC::CLEAR_WP:
     case AUX_FUNC::COMPASS_LEARN:
@@ -515,6 +516,22 @@ bool RC_Channel::read_aux()
     return true;
 }
 
+
+void RC_Channel::do_aux_function_armdisarm(const aux_switch_pos_t ch_flag)
+{
+    // arm or disarm the vehicle
+    switch (ch_flag) {
+    case HIGH:
+        AP::arming().arm(AP_Arming::Method::AUXSWITCH, true);
+        break;
+    case MIDDLE:
+        // nothing
+        break;
+    case LOW:
+        AP::arming().disarm();
+        break;
+    }
+}
 
 void RC_Channel::do_aux_function_avoid_adsb(const aux_switch_pos_t ch_flag)
 {
@@ -661,6 +678,7 @@ void RC_Channel::do_aux_function_relay(const uint8_t relay, bool val)
 
 void RC_Channel::do_aux_function_sprayer(const aux_switch_pos_t ch_flag)
 {
+#if HAL_SPRAYER_ENABLED
     AC_Sprayer *sprayer = AP::sprayer();
     if (sprayer == nullptr) {
         return;
@@ -669,6 +687,7 @@ void RC_Channel::do_aux_function_sprayer(const aux_switch_pos_t ch_flag)
     sprayer->run(ch_flag == HIGH);
     // if we are disarmed the pilot must want to test the pump
     sprayer->test_pump((ch_flag == HIGH) && !hal.util->get_soft_armed());
+#endif // HAL_SPRAYER_ENABLED
 }
 
 void RC_Channel::do_aux_function_gripper(const aux_switch_pos_t ch_flag)
@@ -806,18 +825,7 @@ void RC_Channel::do_aux_function(const aux_func_t ch_option, const aux_switch_po
         break;
 
     case AUX_FUNC::ARMDISARM:
-        // arm or disarm the vehicle
-        switch (ch_flag) {
-        case HIGH:
-            AP::arming().arm(AP_Arming::Method::AUXSWITCH, true);
-            break;
-        case MIDDLE:
-            // nothing
-            break;
-        case LOW:
-            AP::arming().disarm();
-            break;
-        }
+        do_aux_function_armdisarm(ch_flag);
         break;
 
     case AUX_FUNC::COMPASS_LEARN:

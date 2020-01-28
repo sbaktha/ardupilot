@@ -22,6 +22,7 @@
 #include <AP_Frsky_Telem/AP_Frsky_Telem.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <RC_Channel/RC_Channel.h>
+#include <AP_Math/AP_Math.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -69,7 +70,7 @@ struct PACKED FPort_Frame {
             uint8_t crc;
             uint8_t end;
         } control;
-        struct {
+        struct PACKED {
             uint8_t prim;
             uint16_t appid;
             uint8_t data[4];
@@ -116,7 +117,11 @@ void AP_RCProtocol_FPort::decode_control(const FPort_Frame &frame)
     }
 
     bool failsafe = ((frame.control.flags & (1 << FLAGS_FAILSAFE_BIT)) != 0);
-    add_input(MAX_CHANNELS, values, failsafe, frame.control.rssi);
+
+    // we scale rssi by 2x to make it match the value displayed in OpenTX
+    const uint8_t scaled_rssi = MIN(frame.control.rssi*2, 255);
+
+    add_input(MAX_CHANNELS, values, failsafe, scaled_rssi);
 }
 
 /*
@@ -174,6 +179,8 @@ void AP_RCProtocol_FPort::decode_downlink(const FPort_Frame &frame)
         uint16_t sum = 0;
         for (uint8_t i=0; i<sizeof(buf)-1; i++) {
             sum += buf[i];
+            sum += sum >> 8;
+            sum &= 0xFF;              
         }
         sum = 0xff - ((sum & 0xff) + (sum >> 8));
         buf[9] = sum;

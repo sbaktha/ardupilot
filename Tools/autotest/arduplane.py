@@ -1318,6 +1318,9 @@ class AutoTestPlane(AutoTest):
                                 timeout=5)
         self.mav.motors_disarmed_wait()
 
+    def sample_enable_parameter(self):
+        return "Q_ENABLE"
+
     def test_rangefinder(self):
         ex = None
         self.context_push()
@@ -1641,6 +1644,18 @@ class AutoTestPlane(AutoTest):
             ("Button",
              "Test Buttons",
              self.test_button),
+
+            ("FRSkySPort",
+             "Test FrSky SPort mode",
+             self.test_frsky_sport),
+
+            ("FRSkyPassThrough",
+             "Test FrSky PassThrough serial output",
+             self.test_frsky_passthrough),
+
+            ("FRSkyD",
+             "Test FrSkyD serial output",
+             self.test_frsky_d),
 
             ("AdvancedFailsafe",
              "Test Advanced Failsafe",

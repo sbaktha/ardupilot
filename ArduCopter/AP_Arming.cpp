@@ -60,7 +60,8 @@ bool AP_Arming_Copter::run_pre_arm_checks(bool display_failure)
         & parameter_checks(display_failure)
         & motor_checks(display_failure)
         & pilot_throttle_checks(display_failure)
-        & oa_checks(display_failure) &
+        & oa_checks(display_failure)
+        & gcs_failsafe_check(display_failure) &
         AP_Arming::pre_arm_checks(display_failure);
 }
 
@@ -563,6 +564,15 @@ bool AP_Arming_Copter::mandatory_gps_checks(bool display_failure)
     return true;
 }
 
+// Check GCS failsafe
+bool AP_Arming_Copter::gcs_failsafe_check(bool display_failure)
+{
+    if (copter.failsafe.gcs) {
+        check_failed(display_failure, "GCS failsafe on");
+        return false;
+    }
+    return true;
+}
 
 // arm_checks - perform final checks before arming
 //  always called just before arming.  Return true if ok to arm
@@ -784,8 +794,6 @@ bool AP_Arming_Copter::arm(const AP_Arming::Method method, const bool do_arming_
     // finally actually arm the motors
     copter.motors->armed(true);
 
-    AP::logger().Write_Event(LogEvent::ARMED);
-
     // log flight mode in case it was changed while vehicle was disarmed
     AP::logger().Write_Mode((uint8_t)copter.control_mode, copter.control_mode_reason);
 
@@ -852,8 +860,6 @@ bool AP_Arming_Copter::disarm()
     // we are not in the air
     copter.set_land_complete(true);
     copter.set_land_complete_maybe(true);
-
-    AP::logger().Write_Event(LogEvent::DISARMED);
 
     // send disarm command to motors
     copter.motors->armed(false);
