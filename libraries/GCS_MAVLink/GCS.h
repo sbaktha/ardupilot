@@ -292,7 +292,7 @@ public:
     static const struct stream_entries all_stream_entries[];
 
     virtual uint64_t capabilities() const;
-    uint8_t get_stream_slowdown_ms() const { return stream_slowdown_ms; }
+    uint16_t get_stream_slowdown_ms() const { return stream_slowdown_ms; }
 
     MAV_RESULT set_message_interval(uint32_t msg_id, int32_t interval_us);
 
@@ -440,6 +440,7 @@ protected:
     MAV_RESULT handle_command_do_set_mode(const mavlink_command_long_t &packet);
     MAV_RESULT handle_command_get_home_position(const mavlink_command_long_t &packet);
     MAV_RESULT handle_command_do_fence_enable(const mavlink_command_long_t &packet);
+    MAV_RESULT handle_command_debug_trap(const mavlink_command_long_t &packet);
 
     void handle_optical_flow(const mavlink_message_t &msg);
 
@@ -706,6 +707,7 @@ private:
         int fd = -1;
         FTP_FILE_MODE mode; // work around AP_Filesystem not supporting file modes
         int16_t current_session;
+        uint32_t last_send_ms;
     };
     static struct ftp_state ftp;
 
@@ -754,11 +756,11 @@ private:
       since boot in milliseconds
      */
     uint32_t correct_offboard_timestamp_usec_to_ms(uint64_t offboard_usec, uint16_t payload_size);
-    
+
     mavlink_signing_t signing;
     static mavlink_signing_streams_t signing_streams;
     static uint32_t last_signing_save_ms;
-    
+
     static StorageAccess _signing_storage;
     static bool signing_key_save(const struct SigningKey &key);
     static bool signing_key_load(struct SigningKey &key);
@@ -869,6 +871,7 @@ public:
         return 200;
     }
 
+    void init();
     void setup_console();
     void setup_uarts();
 
@@ -906,6 +909,8 @@ public:
     uint8_t get_channel_from_port_number(uint8_t port_num);
 
 protected:
+
+    virtual uint8_t sysid_this_mav() const = 0;
 
     virtual GCS_MAVLINK *new_gcs_mavlink_backend(GCS_MAVLINK_Parameters &params,
                                                  AP_HAL::UARTDriver &uart) = 0;
@@ -974,6 +979,12 @@ private:
 
     // timer called to implement pass-thru
     void passthru_timer();
+
+    // this contains the index of the GCS_MAVLINK backend we will
+    // first call update_send on.  It is incremented each time
+    // GCS::update_send is called so we don't starve later links of
+    // time in which they are permitted to send messages.
+    uint8_t first_backend_to_send;
 };
 
 GCS &gcs();

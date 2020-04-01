@@ -31,16 +31,6 @@ void Plane::init_ardupilot()
 
     ins.set_log_raw_bit(MASK_LOG_IMU_RAW);
 
-    set_control_channels();
-
-    mavlink_system.sysid = g.sysid_this_mav;
-
-    // initialise serial ports
-    serial_manager.init();
-    gcs().setup_console();
-
-    register_scheduler_delay_callback();
-
     // setup any board specific drivers
     BoardConfig.init();
 #if HAL_WITH_UAVCAN
@@ -170,10 +160,6 @@ void Plane::init_ardupilot()
 
     // disable safety if requested
     BoardConfig.init_safety();
-
-#if AP_PARAM_KEY_DUMP
-    AP_Param::show_all(hal.console, true);
-#endif
 }
 
 //********************************************************************************
@@ -480,9 +466,10 @@ void Plane::update_dynamic_notch()
             break;
 
         case HarmonicNotchDynamicMode::UpdateRPM: // rpm sensor based tracking
-            if (rpm_sensor.healthy(0)) {
+            float rpm;
+            if (rpm_sensor.get_rpm(0, rpm)) {
                 // set the harmonic notch filter frequency from the main rotor rpm
-                ins.update_harmonic_notch_freq_hz(MAX(ref_freq, rpm_sensor.get_rpm(0) * ref / 60.0f));
+                ins.update_harmonic_notch_freq_hz(MAX(ref_freq, rpm * ref / 60.0f));
             } else {
                 ins.update_harmonic_notch_freq_hz(ref_freq);
             }
@@ -490,6 +477,12 @@ void Plane::update_dynamic_notch()
 #ifdef HAVE_AP_BLHELI_SUPPORT
         case HarmonicNotchDynamicMode::UpdateBLHeli: // BLHeli based tracking
             ins.update_harmonic_notch_freq_hz(MAX(ref_freq, AP_BLHeli::get_singleton()->get_average_motor_frequency_hz() * ref));
+            break;
+#endif
+#if HAL_GYROFFT_ENABLED
+        case HarmonicNotchDynamicMode::UpdateGyroFFT: // FFT based tracking
+            // set the harmonic notch filter frequency scaled on measured frequency
+            ins.update_harmonic_notch_freq_hz(gyro_fft.get_weighted_noise_center_freq_hz());
             break;
 #endif
         case HarmonicNotchDynamicMode::Fixed: // static

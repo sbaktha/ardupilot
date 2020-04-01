@@ -20,6 +20,8 @@ parser.add_argument(
     '--bootloader', action='store_true', default=False, help='configure for bootloader')
 parser.add_argument(
     'hwdef', type=str, default=None, help='hardware definition file')
+parser.add_argument(
+    '--params', type=str, default=None, help='user default params path')
 
 args = parser.parse_args()
 
@@ -94,6 +96,8 @@ build_flags = []
 imu_list = []
 compass_list = []
 baro_list = []
+
+all_lines = []
 
 mcu_type = None
 dual_USB_enabled = False
@@ -716,10 +720,17 @@ def write_mcu_config(f):
         env_vars['CPU_FLAGS'] = ["-mcpu=%s" % cortex]
         build_info['MCU'] = cortex
     else:
-        # default to F4
         cortex = "cortex-m4"
         env_vars['CPU_FLAGS'] = ["-mcpu=%s" % cortex, "-mfpu=fpv4-sp-d16", "-mfloat-abi=hard"]
         build_info['MCU'] = cortex
+
+    env_vars['CORTEX'] = cortex
+
+    if not args.bootloader:
+        if cortex == 'cortex-m4':
+            env_vars['CPU_FLAGS'].append('-DARM_MATH_CM4')
+        elif cortex == 'cortex-m7':
+            env_vars['CPU_FLAGS'].append('-DARM_MATH_CM7')
 
     if not mcu_series.startswith("STM32F1") and not args.bootloader:
         env_vars['CPU_FLAGS'].append('-u_printf_float')
@@ -1577,6 +1588,13 @@ def write_alt_config(f):
             f.write("    { %u, %s, PAL_LINE(GPIO%s,%uU)}, /* %s */ \\\n" % (alt, p.pal_modeline(), p.port, p.pin, str(p)))
     f.write('}\n\n')
 
+def write_all_lines(hwdat):
+    f = open(hwdat, 'w')
+    f.write('\n'.join(all_lines))
+    f.close()
+    flash_size = get_config('FLASH_SIZE_KB', type=int)
+    if flash_size > 1024:
+        romfs["hwdef.dat"] = hwdat
 
 def write_hwdef_header(outfilename):
     '''write hwdef header file'''
@@ -1774,11 +1792,19 @@ def build_peripheral_list():
 def write_env_py(filename):
     '''write out env.py for environment variables to control the build process'''
 
-    # see if board has a defaults.parm file
+    # see if board has a defaults.parm file or a --default-parameters file was specified
     defaults_filename = os.path.join(os.path.dirname(args.hwdef), 'defaults.parm')
-    if os.path.exists(defaults_filename) and not args.bootloader:
-        print("Adding defaults.parm")
-        env_vars['DEFAULT_PARAMETERS'] = os.path.abspath(defaults_filename)
+    defaults_path = os.path.join(os.path.dirname(args.hwdef), args.params)
+
+    if not args.bootloader:
+        if os.path.exists(defaults_path):
+            env_vars['DEFAULT_PARAMETERS'] = os.path.abspath(defaults_path)
+            print("Default parameters path from command line: %s" % defaults_path)
+        elif os.path.exists(defaults_filename):
+            env_vars['DEFAULT_PARAMETERS'] = os.path.abspath(defaults_filename)
+            print("Default parameters path from hwdef: %s" % defaults_filename)
+        else:
+            print("No default parameter file found")
 
     # CHIBIOS_BUILD_FLAGS is passed to the ChibiOS makefile
     env_vars['CHIBIOS_BUILD_FLAGS'] = ' '.join(build_flags)
@@ -1798,11 +1824,25 @@ def romfs_wildcard(pattern):
         if fnmatch.fnmatch(f, pattern):
             romfs[f] = os.path.join(pattern_dir, f)
 
+def romfs_add_dir(subdirs):
+    '''add a filesystem directory to ROMFS'''
+    for dirname in subdirs:
+        romfs_dir = os.path.join(os.path.dirname(args.hwdef), dirname)
+        if not args.bootloader and os.path.exists(romfs_dir):
+            for root, d, files in os.walk(romfs_dir):
+                for f in files:
+                    if fnmatch.fnmatch(f, '*~'):
+                        # skip editor backup files
+                        continue
+                    fullpath = os.path.join(root, f)
+                    relpath = os.path.normpath(os.path.join(dirname, os.path.relpath(root, romfs_dir), f))
+                    romfs[relpath] = fullpath
 
 def process_line(line):
     '''process one line of pin definition file'''
     global allpins, imu_list, compass_list, baro_list
     global mcu_type, mcu_series
+    all_lines.append(line)
     a = shlex.split(line)
     # keep all config lines for later use
     alllines.append(line)
@@ -1943,11 +1983,16 @@ print("Setup for MCU %s" % mcu_type)
 # build a list for peripherals for DMA resolver
 periph_list = build_peripheral_list()
 
+# write out hw.dat for ROMFS
+write_all_lines(os.path.join(outdir, "hw.dat"))
+
 # write out hwdef.h
 write_hwdef_header(os.path.join(outdir, "hwdef.h"))
 
 # write out ldscript.ld
 write_ldscript(os.path.join(outdir, "ldscript.ld"))
+
+romfs_add_dir(['scripts'])
 
 write_ROMFS(outdir)
 

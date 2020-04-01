@@ -41,6 +41,7 @@
 #include <AP_Baro/AP_Baro.h>
 #include <AP_EFI/AP_EFI.h>
 #include <AP_Proximity/AP_Proximity.h>
+#include <AP_Scripting/AP_Scripting.h>
 
 #include <stdio.h>
 
@@ -217,7 +218,7 @@ void GCS_MAVLINK::send_battery_status(const uint8_t instance) const
 
     float current, consumed_mah, consumed_wh;
     if (battery.current_amps(current, instance)) {
-         current *= 100;
+         current = constrain_float(current * 100,-INT16_MAX,INT16_MAX);
     } else {
         current = -1;
     }
@@ -846,6 +847,12 @@ uint16_t GCS_MAVLINK::get_reschedule_interval_ms(const deferred_message_bucket_t
         // we are sending requests for waypoints, penalize streams:
         interval_ms *= 4;
     }
+#if HAVE_FILESYSTEM_SUPPORT
+    if (ftp.replies && AP_HAL::millis() - ftp.last_send_ms < 500) {
+        // we are sending ftp replies
+        interval_ms *= 4;
+    }
+#endif
 
     if (interval_ms > 60000) {
         return 60000;
@@ -1242,7 +1249,6 @@ bool GCS_MAVLINK::set_ap_message_interval(enum ap_message id, uint16_t interval_
         deferred_message_bucket[empty_bucket_id].interval_ms = interval_ms;
         deferred_message_bucket[empty_bucket_id].last_sent_ms = AP_HAL::millis16();
         closest_bucket = empty_bucket_id;
-        closest_bucket_interval_delta = 0;
     }
 
     deferred_message_bucket[closest_bucket].ap_message_ids.set(id);
@@ -1481,13 +1487,40 @@ void GCS_MAVLINK::log_mavlink_stats()
         return;
     }
 
+    enum class Flags {
+        USING_SIGNING = (1<<0),
+        ACTIVE = (1<<1),
+        STREAMING = (1<<2),
+        PRIVATE = (1<<3),
+        LOCKED = (1<<4),
+    };
+
+    uint8_t flags = 0;
+    if (signing_enabled()) {
+        flags |= (uint8_t)Flags::USING_SIGNING;
+    }
+    if (is_streaming()) {
+        flags |= (uint8_t)Flags::STREAMING;
+    }
+    if (is_active()) {
+        flags |= (uint8_t)Flags::ACTIVE;
+    }
+    if (is_private()) {
+        flags |= (uint8_t)Flags::PRIVATE;
+    }
+    if (locked()) {
+        flags |= (uint8_t)Flags::LOCKED;
+    }
+
     const struct log_MAV pkt = {
     LOG_PACKET_HEADER_INIT(LOG_MAV_MSG),
     time_us                : AP_HAL::micros64(),
     chan                   : (uint8_t)chan,
     packet_tx_count        : send_packet_count,
     packet_rx_success_count: status->packet_rx_success_count,
-    packet_rx_drop_count   : status->packet_rx_drop_count
+    packet_rx_drop_count   : status->packet_rx_drop_count,
+    flags                  : flags,
+    stream_slowdown_ms     : stream_slowdown_ms
     };
 
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
@@ -1828,7 +1861,9 @@ void GCS::send_textv(MAV_SEVERITY severity, const char *fmt, va_list arg_list, u
         }
 
         // try and send immediately if possible
-        service_statustext();
+        if (hal.scheduler->in_main_thread()) {
+            service_statustext();
+        }
     } while (false);
 
     // given we don't really know what these methods get up to, we
@@ -1932,8 +1967,18 @@ void GCS::update_send()
     if (_missionitemprotocol_fence != nullptr) {
         _missionitemprotocol_fence->update();
     }
-    for (uint8_t i=0; i<num_gcs(); i++) {
+    // round-robin the GCS_MAVLINK backend that gets to go first so
+    // one backend doesn't monopolise all of the time allowed for sending
+    // messages
+    for (uint8_t i=first_backend_to_send; i<num_gcs(); i++) {
         chan(i)->update_send();
+    }
+    for (uint8_t i=0; i<first_backend_to_send; i++) {
+        chan(i)->update_send();
+    }
+    first_backend_to_send++;
+    if (first_backend_to_send >= num_gcs()) {
+        first_backend_to_send = 0;
     }
     WITH_SEMAPHORE(_statustext_sem);
     service_statustext();
@@ -2031,7 +2076,7 @@ void GCS_MAVLINK::send_battery2()
     if (battery.num_instances() > 1) {
         float current;
         if (battery.current_amps(current, 1)) {
-            current *= 100; // 10*mA
+            current = constrain_float(current * 100,-INT16_MAX,INT16_MAX); // 10*mA
         } else {
             current = -1;
         }
@@ -2152,18 +2197,15 @@ void GCS_MAVLINK::send_autopilot_version() const
                         (uint32_t)(version.fw_type) << (8 * 0);
 
     if (version.fw_hash_str) {
-        strncpy(flight_custom_version, version.fw_hash_str, sizeof(flight_custom_version) - 1);
-        flight_custom_version[sizeof(flight_custom_version) - 1] = '\0';
+        strncpy(flight_custom_version, version.fw_hash_str, ARRAY_SIZE(flight_custom_version));
     }
 
     if (version.middleware_hash_str) {
-        strncpy(middleware_custom_version, version.middleware_hash_str, sizeof(middleware_custom_version) - 1);
-        middleware_custom_version[sizeof(middleware_custom_version) - 1] = '\0';
+        strncpy(middleware_custom_version, version.middleware_hash_str, ARRAY_SIZE(middleware_custom_version));
     }
 
     if (version.os_hash_str) {
-        strncpy(os_custom_version, version.os_hash_str, sizeof(os_custom_version) - 1);
-        os_custom_version[sizeof(os_custom_version) - 1] = '\0';
+        strncpy(os_custom_version, version.os_hash_str, ARRAY_SIZE(os_custom_version));
     }
 
     mavlink_msg_autopilot_version_send(
@@ -2553,14 +2595,27 @@ MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_long_t &pa
 {
     if (is_equal(packet.param1, 42.0f) &&
         is_equal(packet.param2, 24.0f) &&
-        is_equal(packet.param3, 71.0f) &&
-        is_equal(packet.param4, 93.0f)) {
-        // this is a magic sequence to force the main loop to
-        // lockup. This is for testing the stm32 watchdog
-        // functionality
-        while (true) {
-            send_text(MAV_SEVERITY_WARNING,"entering lockup");
-            hal.scheduler->delay(250);
+        is_equal(packet.param3, 71.0f)) {
+        if (is_equal(packet.param4, 93.0f)) {
+            // this is a magic sequence to force the main loop to
+            // lockup. This is for testing the stm32 watchdog
+            // functionality
+            while (true) {
+                send_text(MAV_SEVERITY_WARNING,"entering lockup");
+                hal.scheduler->delay(250);
+            }
+        }
+        if (is_equal(packet.param4, 94.0f)) {
+            // the following text is unlikely to make it out...
+            send_text(MAV_SEVERITY_WARNING,"deferencing a bad thing");
+
+            void *foo = (void*)0xE000ED38;
+
+            typedef void (*fptr)();
+            fptr gptr = (fptr) (void *) foo;
+            gptr();
+
+            return MAV_RESULT_FAILED;
         }
     }
 
@@ -3148,12 +3203,13 @@ void GCS_MAVLINK::handle_common_message(const mavlink_message_t &msg)
         break;
 
     case MAVLINK_MSG_ID_DIGICAM_CONTROL:
+    case MAVLINK_MSG_ID_GOPRO_HEARTBEAT: // heartbeat from a GoPro in Solo gimbal
         {
             AP_Camera *camera = AP::camera();
             if (camera == nullptr) {
                 return;
             }
-            camera->control_msg(msg);
+            camera->handle_message(chan, msg);
         }
         break;
 
@@ -3372,6 +3428,12 @@ void GCS_MAVLINK::send_banner()
     if (hal.util->get_system_id(sysid)) {
         send_text(MAV_SEVERITY_INFO, "%s", sysid);
     }
+
+    // send RC output mode info if available
+    char banner_msg[50];
+    if (hal.rcout->get_output_mode_banner(banner_msg, sizeof(banner_msg))) {
+        send_text(MAV_SEVERITY_INFO, "%s", banner_msg);
+    }
 }
 
 
@@ -3393,11 +3455,16 @@ MAV_RESULT GCS_MAVLINK::handle_command_flash_bootloader(const mavlink_command_lo
         return MAV_RESULT_FAILED;
     }
 
-    if (hal.util->flash_bootloader() != AP_HAL::Util::FlashBootloader::OK) {
-        return MAV_RESULT_FAILED;
+    switch (hal.util->flash_bootloader()) {
+    case AP_HAL::Util::FlashBootloader::OK:
+    case AP_HAL::Util::FlashBootloader::NO_CHANGE:
+        // consider NO_CHANGE as success (so as not to display error to user)
+        return MAV_RESULT_ACCEPTED;
+    default:
+        break;
     }
 
-    return MAV_RESULT_ACCEPTED;
+    return MAV_RESULT_FAILED;
 }
 
 MAV_RESULT GCS_MAVLINK::handle_command_preflight_set_sensor_offsets(const mavlink_command_long_t &packet)
@@ -3494,6 +3561,7 @@ MAV_RESULT GCS_MAVLINK::handle_command_preflight_calibration(const mavlink_comma
 {
     if (hal.util->get_soft_armed()) {
         // *preflight*, remember?
+        gcs().send_text(MAV_SEVERITY_NOTICE, "Disarm to allow calibration");
         return MAV_RESULT_FAILED;
     }
     // now call subclass methods:
@@ -3606,6 +3674,18 @@ MAV_RESULT GCS_MAVLINK::handle_command_get_home_position(const mavlink_command_l
     }
 
     return MAV_RESULT_ACCEPTED;
+}
+
+MAV_RESULT GCS_MAVLINK::handle_command_debug_trap(const mavlink_command_long_t &packet)
+{
+    // magic number must be supplied to trap; you must *really* mean it.
+    if (uint32_t(packet.param1) != 32451) {
+        return MAV_RESULT_DENIED;
+    }
+    if (hal.util->trap()) {
+        return MAV_RESULT_ACCEPTED;
+    }
+    return MAV_RESULT_UNSUPPORTED;
 }
 
 MAV_RESULT GCS_MAVLINK::handle_command_do_gripper(const mavlink_command_long_t &packet)
@@ -3775,6 +3855,10 @@ MAV_RESULT GCS_MAVLINK::handle_command_long_packet(const mavlink_command_long_t 
         result = handle_command_get_home_position(packet);
         break;
 
+    case MAV_CMD_DEBUG_TRAP:
+        result = handle_command_debug_trap(packet);
+        break;
+
     case MAV_CMD_PREFLIGHT_STORAGE:
         if (is_equal(packet.param1, 2.0f)) {
             AP_Param::erase_all();
@@ -3826,7 +3910,7 @@ MAV_RESULT GCS_MAVLINK::handle_command_long_packet(const mavlink_command_long_t 
                 !is_equal(packet.param2, magic_force_disarm_value)) {
                 return MAV_RESULT_FAILED;
             }
-            if (AP::arming().disarm()) {
+            if (AP::arming().disarm(AP_Arming::Method::MAVLINK)) {
                 return MAV_RESULT_ACCEPTED;
             }
             return MAV_RESULT_FAILED;
@@ -4033,6 +4117,16 @@ MAV_RESULT GCS_MAVLINK::handle_command_int_packet(const mavlink_command_int_t &p
         return handle_command_do_set_roi_sysid(packet);
     case MAV_CMD_DO_SET_HOME:
         return handle_command_int_do_set_home(packet);
+#ifdef ENABLE_SCRIPTING
+    case MAV_CMD_SCRIPTING:
+        {
+            AP_Scripting *scripting = AP_Scripting::get_singleton();
+            if (scripting == nullptr) {
+                return MAV_RESULT_UNSUPPORTED;
+            }
+            return scripting->handle_command_int_packet(packet);
+        }
+#endif // ENABLE_SCRIPTING
     default:
         break;
     }
@@ -4125,10 +4219,15 @@ void GCS_MAVLINK::send_rpm() const
         return;
     }
 
+    float rpm1 = -1, rpm2 = -1;
+
+    rpm->get_rpm(0, rpm1);
+    rpm->get_rpm(1, rpm2);
+
     mavlink_msg_rpm_send(
         chan,
-        rpm->get_rpm(0),
-        rpm->get_rpm(1));
+        rpm1,
+        rpm2);
 }
 
 void GCS_MAVLINK::send_sys_status()
@@ -4145,7 +4244,7 @@ void GCS_MAVLINK::send_sys_status()
 
     if (battery.healthy() && battery.current_amps(battery_current)) {
         battery_remaining = battery.capacity_remaining_pct();
-        battery_current *= 100;
+        battery_current = constrain_float(battery_current * 100,-INT16_MAX,INT16_MAX);
     } else {
         battery_current = -1;
         battery_remaining = -1;

@@ -140,6 +140,9 @@ bool GCS_MAVLINK_Sub::send_info()
     CHECK_PAYLOAD_SIZE(NAMED_VALUE_FLOAT);
     send_named_float("InputHold", sub.input_hold_engaged);
 
+    CHECK_PAYLOAD_SIZE(NAMED_VALUE_FLOAT);
+    send_named_float("RollPitch", sub.roll_pitch_flag);
+
     return true;
 }
 
@@ -794,7 +797,7 @@ void GCS_MAVLINK_Sub::handle_rc_channels_override(const mavlink_message_t &msg)
  */
 MAV_RESULT GCS_MAVLINK_Sub::handle_flight_termination(const mavlink_command_long_t &packet) {
     if (packet.param1 > 0.5f) {
-        sub.arming.disarm();
+        sub.arming.disarm(AP_Arming::Method::TERMINATION);
         return MAV_RESULT_ACCEPTED;
     }
     return MAV_RESULT_FAILED;

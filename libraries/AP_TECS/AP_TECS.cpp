@@ -911,7 +911,7 @@ void AP_TECS::_update_pitch(void)
 void AP_TECS::_initialise_states(int32_t ptchMinCO_cd, float hgt_afe)
 {
     // Initialise states and variables if DT > 1 second or in climbout
-    if (_DT > 1.0f)
+    if (_DT > 1.0f || _need_reset)
     {
         _integTHR_state      = 0.0f;
         _integSEB_state      = 0.0f;
@@ -927,6 +927,7 @@ void AP_TECS::_initialise_states(int32_t ptchMinCO_cd, float hgt_afe)
         _flags.reached_speed_takeoff = false;
         _DT                = 0.1f; // when first starting TECS, use a
         // small time constant
+        _need_reset = false;
     }
     else if (_flight_stage == AP_Vehicle::FixedWing::FLIGHT_TAKEOFF || _flight_stage == AP_Vehicle::FixedWing::FLIGHT_ABORT_LAND)
     {
@@ -1131,6 +1132,26 @@ void AP_TECS::update_pitch_throttle(int32_t hgt_dem_cm,
     _update_pitch();
 
     // log to AP_Logger
+    // @LoggerMessage: TECS
+    // @Vehicles: Plane
+    // @Description: Information about the Total Energy Control System
+    // @URL: http://ardupilot.org/plane/docs/tecs-total-energy-control-system-for-speed-height-tuning-guide.html
+    // @Field: TimeUS: microseconds since system startup
+    // @Field: h: height estimate (UP) currently in use by TECS
+    // @Field: dh: current climb rate ("delta-height")
+    // @Field: hdem: height TECS is currently trying to achieve
+    // @Field: dhdem: climb rate TECS is currently trying to achieve
+    // @Field: spdem: True AirSpeed TECS is currently trying to achieve
+    // @Field: sp: current estimated True AirSpeed
+    // @Field: dsp: x-axis acceleration estimate ("delta-speed")
+    // @Field: ith: throttle integrator value
+    // @Field: iph: Specific Energy Balance integrator value
+    // @Field: th: throttle output
+    // @Field: ph: pitch output
+    // @Field: dspdem: demanded acceleration output ("delta-speed demand")
+    // @Field: w: current TECS prioritization of height vs speed (0==100% height,2==100% speed, 1==50%height+50%speed
+    // @Field: f: flags
+    // @FieldBits: f: Underspeed,UnachievableDescent,AutoLanding,ReachedTakeoffSpd
     AP::logger().Write(
         "TECS",
         "TimeUS,h,dh,hdem,dhdem,spdem,sp,dsp,ith,iph,th,ph,dspdem,w,f",
@@ -1152,6 +1173,17 @@ void AP_TECS::update_pitch_throttle(int32_t hgt_dem_cm,
         (double)_TAS_rate_dem,
         (double)logging.SKE_weighting,
         _flags_byte);
+    // @LoggerMessage: TEC2
+    // @Vehicles: Plane
+    // @Description: Additional Information about the Total Energy Control System
+    // @URL: http://ardupilot.org/plane/docs/tecs-total-energy-control-system-for-speed-height-tuning-guide.html
+    // @Field: TimeUS: microseconds since system startup
+    // @Field: pmax: maximum allowed pitch from parameter
+    // @Field: pmin: minimum allowed pitch from parameter
+    // @Field: KErr: difference between estimated kinetic energy and desired kinetic energy
+    // @Field: PErr: difference between estimated potential energy and desired potential energy
+    // @Field: EDelta: current error in speed/balance weighting
+    // @Field: LF: aerodynamic load factor
     AP::logger().Write("TEC2", "TimeUS,pmax,pmin,KErr,PErr,EDelta,LF",
                        "s------",
                        "F------",

@@ -266,6 +266,8 @@ void AP_MotorsMulticopter::output_boost_throttle(void)
     if (_boost_scale > 0) {
         float throttle = constrain_float(get_throttle() * _boost_scale, 0, 1);
         SRV_Channels::set_output_scaled(SRV_Channel::k_boost_throttle, throttle * 1000);
+    } else {
+        SRV_Channels::set_output_scaled(SRV_Channel::k_boost_throttle, 0);
     }
 }
 
@@ -481,6 +483,27 @@ int16_t AP_MotorsMulticopter::get_pwm_output_max() const
         return _pwm_max;
     }
     return _throttle_radio_max;
+}
+
+// parameter checks for MOT_PWM_MIN/MAX, returns true if parameters are valid
+bool AP_MotorsMulticopter::check_mot_pwm_params() const
+{
+    // both must be zero or both non-zero:
+    if (_pwm_min == 0 && _pwm_max != 0) {
+        return false;
+    }
+    if (_pwm_min != 0 && _pwm_max == 0) {
+        return false;
+    }
+    // sanity says that minimum should be less than maximum:
+    if (_pwm_min != 0 && _pwm_min >= _pwm_max) {
+        return false;
+    }
+    // negative values are out-of-range:
+    if (_pwm_min < 0 || _pwm_max < 0) {
+        return false;
+    }
+    return true;
 }
 
 // set_throttle_range - sets the minimum throttle that will be sent to the engines when they're not off (i.e. to prevents issues with some motors spinning and some not at very low throttle)

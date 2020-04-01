@@ -104,7 +104,7 @@ class AutoTestSub(AutoTest):
 
 
         self.set_rc(Joystick.Throttle, 1000)
-        self.wait_altitude(alt_min=-6, alt_max=-5)
+        self.wait_altitude(altitude_min=-6, altitude_max=-5)
         self.set_rc(Joystick.Throttle, 1500)
 
         # let the vehicle settle (momentum / stopping point shenanigans....)
@@ -113,7 +113,7 @@ class AutoTestSub(AutoTest):
         self.watch_altitude_maintained()
 
         self.set_rc(Joystick.Throttle, 1000)
-        self.wait_altitude(alt_min=-20, alt_max=-19)
+        self.wait_altitude(altitude_min=-20, altitude_max=-19)
         self.set_rc(Joystick.Throttle, 1500)
 
         # let the vehicle settle (momentum / stopping point shenanigans....)
@@ -122,7 +122,7 @@ class AutoTestSub(AutoTest):
         self.watch_altitude_maintained()
 
         self.set_rc(Joystick.Throttle, 1900)
-        self.wait_altitude(alt_min=-14, alt_max=-13)
+        self.wait_altitude(altitude_min=-14, altitude_max=-13)
         self.set_rc(Joystick.Throttle, 1500)
 
         # let the vehicle settle (momentum / stopping point shenanigans....)
@@ -131,7 +131,7 @@ class AutoTestSub(AutoTest):
         self.watch_altitude_maintained()
 
         self.set_rc(Joystick.Throttle, 1900)
-        self.wait_altitude(alt_min=-5, alt_max=-4)
+        self.wait_altitude(altitude_min=-5, altitude_max=-4)
         self.set_rc(Joystick.Throttle, 1500)
 
         # let the vehicle settle (momentum / stopping point shenanigans....)
@@ -140,6 +140,21 @@ class AutoTestSub(AutoTest):
         self.watch_altitude_maintained()
 
         self.disarm_vehicle()
+
+    def test_mot_thst_hover_ignore(self):
+        """Test if we are ignoring MOT_THST_HOVER parameter
+        """
+
+        # Test default parameter value
+        mot_thst_hover_value = self.get_parameter("MOT_THST_HOVER")
+        if mot_thst_hover_value != 0.5:
+            raise NotAchievedException("Unexpected default MOT_THST_HOVER parameter value {}".format(mot_thst_hover_value))
+
+        # Test if parameter is being ignored
+        for value in [0.25, 0.75]:
+            self.set_parameter("MOT_THST_HOVER", value)
+            self.test_alt_hold()
+
 
     def dive_manual(self):
         self.wait_ready_to_arm()
@@ -286,6 +301,8 @@ class AutoTestSub(AutoTest):
             ("GripperMission",
              "Test gripper mission items",
              self.test_gripper_mission),
+
+            ("MotorThrustHoverParameterIgnore", "Test if we are ignoring MOT_THST_HOVER", self.test_mot_thst_hover_ignore),
 
             ("SET_POSITION_TARGET_GLOBAL_INT",
              "Move vehicle using SET_POSITION_TARGET_GLOBAL_INT",
