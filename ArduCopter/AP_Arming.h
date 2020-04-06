@@ -22,9 +22,12 @@ public:
     void update(void);
 
     bool rc_calibration_checks(bool display_failure) override;
-
+    
+    // ---------------npnt changes------------------
     bool disarm(AP_Arming::Method method) override;
-    bool arm(AP_Arming::Method method, bool do_arming_checks=true) override;
+    // bool arm(AP_Arming::Method method, bool do_arming_checks=true) override;
+    // bool disarm() override;
+    bool arm(AP_Arming::Method method, bool do_arming_checks=true, double key = 0) override;
 
 protected:
 

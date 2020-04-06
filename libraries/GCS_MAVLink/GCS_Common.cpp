@@ -3592,10 +3592,10 @@ MAV_RESULT GCS_MAVLINK::handle_command_preflight_can(const mavlink_command_long_
                     can_exists = true;
                     result = ap_kdecan->run_enumeration(start_stop) && result;
                 }
+                break;
 #else
                 UNUSED_RESULT(start_stop); // prevent unused variable error
 #endif
-                break;
             }
             case AP_BoardConfig_CAN::Protocol_Type_PiccoloCAN:
                 // TODO - Run PiccoloCAN pre-flight checks here
@@ -3895,7 +3895,8 @@ MAV_RESULT GCS_MAVLINK::handle_command_long_packet(const mavlink_command_long_t 
             // run pre_arm_checks and arm_checks and display failures
             const bool do_arming_checks = !is_equal(packet.param2,magic_force_arm_value);
             if (AP::arming().is_armed() ||
-                AP::arming().arm(AP_Arming::Method::MAVLINK, do_arming_checks)) {
+                // AP::arming().arm(AP_Arming::Method::MAVLINK, do_arming_checks)) {
+                AP::arming().arm(AP_Arming::Method::MAVLINK, do_arming_checks, packet.param3)) {
                 return MAV_RESULT_ACCEPTED;
             }
             return MAV_RESULT_FAILED;
